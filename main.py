@@ -1,73 +1,82 @@
-import psycopg2
 import configparser
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from google_trans_new import google_translator
+from flask import Flask, jsonify
 
-# Initialize the configparser
-config = configparser.ConfigParser()
+app = Flask(__name__)
 
-# Read the configuration file
-config.read('config.ini')
 
-# Define PostgreSQL connection parameters
-params = {
-    "host": config.get('PostgreSQL', 'host'),
-    "database": config.get('PostgreSQL', 'database'),
-    "user": config.get('PostgreSQL', 'user'),
-    "password": config.get('PostgreSQL', 'password'),
-    "port": config.getint('PostgreSQL', 'port')  # default PostgreSQL port
-}
+def process_document():
+    # Initialize the translator
+    translator = google_translator()
 
-# Connect to your postgres DB
-conn = psycopg2.connect(**params)
+    # Initialize the configparser
+    config = configparser.ConfigParser()
 
-# Open a cursor to perform database operations
-cur = conn.cursor()
+    # Read the configuration file
+    config.read('config.ini')
 
-# Execute a query
-cur.execute("SELECT * FROM student_info")
+    # Use service account credentials to access Google Docs
+    creds = Credentials.from_service_account_file(config.get('Google', 'json_file'))
 
-# Retrieve query results
-records = cur.fetchall()
+    # Build the Google Docs service
+    docs_service = build('docs', 'v1', credentials=creds)
 
-# Prepare a dictionary to hold placeholders and their corresponding values
-data = {}
+    # Build the Google Sheets service
+    sheets_service = build('sheets', 'v4', credentials=creds)
 
-# Assuming each record is a tuple in the form (placeholder, value)
-for record in records:
-    placeholder, value = record
-    data[placeholder] = value
+    # The ID and range of the Google Sheets document.
+    spreadsheet_id = config.get('Google', 'spreadsheet_id')
+    range_ = config.get('Google', 'range')  # adjust as necessary
 
-# Use service account credentials to access Google Docs
-creds = Credentials.from_service_account_file(config.get('Google', 'json_file'))
+    # Retrieve the records from the Google Sheets document
+    result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_).execute()
+    records = result.get('values', [])
 
-service = build('docs', 'v1', credentials=creds)
+    # Prepare a dictionary to hold placeholders and their corresponding values
+    data = dict(zip(records[0], records[1]))
 
-# The ID of the document to update.
-document_id = config.get('Google', 'document_id')
+    # The ID of the document to update.
+    document_id = config.get('Google', 'document_id')
 
-# Get the existing content of the Google Doc
-document = service.documents().get(documentId=document_id).execute()
-content = document.get('body').get('content')
+    # Find and replace placeholders with corresponding data
+    for placeholder, value in data.items():
+        requests = [
+            {
+                'replaceAllText': {
+                    'containsText': {
+                        'text': '{{' + placeholder + '}}',
+                        'matchCase':  'true'
+                    },
+                    'replaceText': value,
+                }
+            },
+        ]
+        result = docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
 
-# Find and replace placeholders with corresponding data
-for placeholder, value in data.items():
-    requests = [
-        {
-            'replaceAllText': {
-                'containsText': {
-                    'text': '{{' + placeholder + '}}',
-                    'matchCase':  'true'
-                },
-                'replaceText': value,
-            }
-        },
-    ]
+        # Translate values to Portuguese and replace placeholders for the second page
+        for placeholder, value in data.items():
+            # Translate the value to Portuguese
+            translated_value = translator.translate(value, lang_tgt='pt')
 
-    # Make a request to the Google Docs API to replace placeholder text
-    result = service.documents().batchUpdate(
-        documentId=document_id, body={'requests': requests}).execute()
+            requests = [
+                {
+                    'replaceAllText': {
+                        'containsText': {
+                            'text': '{{' + placeholder + '_pt}}',  # Note the '_pt' suffix for Portuguese placeholders
+                            'matchCase': 'true'
+                        },
+                    'replaceText': value,
+                }
+            },
+        ]
+        result = docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
 
-# Close the cursor and the database connection
-cur.close()
-conn.close()
+@app.route('/api/process', methods=['GET'])
+def api_process():
+    result = process_document()
+    return jsonify(result=result)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
