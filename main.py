@@ -35,7 +35,8 @@ def process_document():
     records = result.get('values', [])
 
     # Prepare a dictionary to hold placeholders and their corresponding values
-    data = dict(zip(records[0], records[1]))
+    # Here, we assume that records is a list of lists, where each inner list has two elements: key and value.
+    data = {record[0]: record[1] for record in records}
 
     # The ID of the document to update.
     document_id = config.get('Google', 'document_id')
