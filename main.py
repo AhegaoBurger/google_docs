@@ -58,8 +58,13 @@ def process_document():
 
     # Translate values to Portuguese and replace placeholders for the second page
     for placeholder, value in data.items():
-        # Translate the value to Portuguese
-        translated_value = translator.translate(value, dest='pt').text
+        try:
+            # Translate the value to Portuguese
+            translated_value = translator.translate(value, dest='pt').text
+        except Exception as e:
+            print(f"Error translating value for placeholder '{placeholder}': {value}")
+            print(e)
+            continue
 
         requests = [
             {
