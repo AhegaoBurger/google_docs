@@ -1,7 +1,7 @@
 import configparser
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from google_trans_new import google_translator
+from googletrans import Translator
 from flask import Flask, jsonify
 
 app = Flask(__name__)
@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 def process_document():
     # Initialize the translator
-    translator = google_translator()
+    translator = Translator()
 
     # Initialize the configparser
     config = configparser.ConfigParser()
@@ -55,28 +55,33 @@ def process_document():
         ]
         result = docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
 
-        # Translate values to Portuguese and replace placeholders for the second page
-        for placeholder, value in data.items():
-            # Translate the value to Portuguese
-            translated_value = translator.translate(value, lang_tgt='pt')
+    # Translate values to Portuguese and replace placeholders for the second page
+    for placeholder, value in data.items():
+        # Translate the value to Portuguese
+        translated_value = translator.translate(value, dest='pt').text
 
-            requests = [
-                {
-                    'replaceAllText': {
-                        'containsText': {
-                            'text': '{{' + placeholder + '_pt}}',  # Note the '_pt' suffix for Portuguese placeholders
-                            'matchCase': 'true'
-                        },
-                    'replaceText': value,
+        requests = [
+            {
+                'replaceAllText': {
+                    'containsText': {
+                        'text': '{{' + placeholder + '_pt}}',
+                        'matchCase': 'true'
+                    },
+                    'replaceText': translated_value,
                 }
             },
         ]
         result = docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
 
+    return result
+
 @app.route('/api/process', methods=['GET'])
 def api_process():
-    result = process_document()
-    return jsonify(result=result)
+    try:
+        result = process_document()
+        return jsonify(result=result)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
