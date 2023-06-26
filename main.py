@@ -6,7 +6,6 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-
 def process_document():
     # Initialize the translator
     translator = Translator()
@@ -23,23 +22,31 @@ def process_document():
     # Build the Google Docs service
     docs_service = build('docs', 'v1', credentials=creds)
 
+    # Build the Google Drive service
+    drive_service = build('drive', 'v3', credentials=creds)
+
     # Build the Google Sheets service
     sheets_service = build('sheets', 'v4', credentials=creds)
 
     # The ID and range of the Google Sheets document.
     spreadsheet_id = config.get('Google', 'spreadsheet_id')
-    range_ = config.get('Google', 'range')  # adjust as necessary
+    range_ = config.get('Google', 'range')
 
     # Retrieve the records from the Google Sheets document
     result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_).execute()
     records = result.get('values', [])
 
     # Prepare a dictionary to hold placeholders and their corresponding values
-    # Here, we assume that records is a list of lists, where each inner list has two elements: key and value.
     data = {record[0]: record[1] for record in records}
 
-    # The ID of the document to update.
+    # The ID of the document to copy
     document_id = config.get('Google', 'document_id')
+
+    # Copy the document
+    copied_doc = drive_service.files().copy(fileId=document_id).execute()
+
+    # Get the ID of the copied document
+    copied_doc_id = copied_doc['id']
 
     # Find and replace placeholders with corresponding data
     for placeholder, value in data.items():
@@ -54,17 +61,12 @@ def process_document():
                 }
             },
         ]
-        result = docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
+        result = docs_service.documents().batchUpdate(documentId=copied_doc_id, body={'requests': requests}).execute()
 
     # Translate values to Portuguese and replace placeholders for the second page
     for placeholder, value in data.items():
-        try:
-            # Translate the value to Portuguese
-            translated_value = translator.translate(value, dest='pt').text
-        except Exception as e:
-            print(f"Error translating value for placeholder '{placeholder}': {value}")
-            print(e)
-            continue
+        # Translate the value to Portuguese
+        translated_value = translator.translate(value, dest='pt').text
 
         requests = [
             {
@@ -77,7 +79,7 @@ def process_document():
                 }
             },
         ]
-        result = docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
+        result = docs_service.documents().batchUpdate(documentId=copied_doc_id, body={'requests': requests}).execute()
 
     return result
 
